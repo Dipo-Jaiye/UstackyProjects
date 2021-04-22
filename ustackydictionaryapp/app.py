@@ -1,9 +1,10 @@
-from flask import Flask, render_template, url_for, request, redirect, flash, current_app
+from flask import Flask, render_template, url_for, request, redirect, flash, current_app, render_template_string
 from flaskext.mysql import MySQL
 import datetime
 import pymysql.cursors
 from os import environ as env
 from dotenv import load_dotenv
+
 load_dotenv()
 app = Flask(__name__)
 app.secret_key = env.get("SECRET_KEY")
