@@ -2,10 +2,9 @@ from flask import Flask, render_template, url_for, request, redirect, flash, cur
 from flaskext.mysql import MySQL
 from pymysql.cursors import DictCursor
 from dotenv import load_dotenv
-import datetime
-from os import environ as env
-
+from os import environ as env,path
 load_dotenv()
+
 app = Flask(__name__)
 app.secret_key = env.get("SECRET_KEY")
 app.config["MYSQL_DATABASE_HOST"] = env.get("DB_HOST")
@@ -14,12 +13,53 @@ app.config["MYSQL_DATABASE_USER"] = env.get("DB_USER")
 app.config["MYSQL_DATABASE_PASSWORD"] = env.get("DB_PASSWORD")
 mysql = MySQL(app,cursorclass=DictCursor)
 
+#Function to create the table in database if nonexistent
+def create_tb():
+    conn = mysql.get_db()
+    cur = conn.cursor()
+    conn.ping(reconnect=True) #make sure the connection to db is open
+    cur.execute('SHOW TABLES')
+    found = 0
+    for c in cur:
+        for title,val in c.items():
+            if val == "students":
+                found = 1
+                break
+    if found:
+        cur.close()
+        pass
+    else:
+        cur = conn.cursor()
+        stmt = 'DROP TABLE IF EXISTS students;'
+        cur.execute(stmt)
+        stmt = "CREATE TABLE students(id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,"\
+            "first_name VARCHAR(50),"\
+            "middle_name VARCHAR(50),"\
+            "last_name VARCHAR(50),"\
+            "email VARCHAR(50),"\
+            "dob DATE,"\
+            "gender VARCHAR(7),"\
+            "phone VARCHAR(15),"\
+            "address VARCHAR(255),"\
+            "state VARCHAR(30),"\
+            "local_gov VARCHAR(40),"\
+            "kin VARCHAR(50),"\
+            "score INT,"\
+            "image_name VARCHAR(1024),"\
+            "status VARCHAR(20) DEFAULT('undecided')"\
+            ");"
+        cur.execute(stmt)
+        conn.commit()
+    conn.close()
+
 @app.route("/")
 def home():
-    return render_template("home.html")
+    create_tb()
+    return render_template("home.html")    
 
 @app.route("/student/new",methods=["GET","POST"])
 def student_new():
+    create_tb()
     if request.method == "GET":
         return render_template("student_new.html")
     else:
@@ -36,24 +76,89 @@ def student_new():
         s_kin = request.form['kin']
         s_score = request.form['score']
         s_image = request.files['image']
-        if [s_addr,s_dob,s_email,s_fname,s_gndr,s_image,s_kin,s_lg,s_lname,s_mname,s_phone,s_score,s_state] == "":
-            flash("Please enter a valid input",'danger')
+        var_array = [s_fname,s_mname,s_lname,s_email,s_dob,s_gndr,s_phone,s_addr,s_state,s_lg,s_kin,s_score,s_image]
+
+        #prevent empty values and non-images from being uploaded
+        if (not all(var_array)) or (s_image.mimetype.split('/')[0] != "image"):
+            flash("Please fill all fields appropriately",'danger')
             return redirect(url_for('student_new'))
-        else:    
+        else:
+            #save image regardless of file extension
+            s_imagename = f"{s_fname}{s_lname}.{s_image.mimetype.split('/')[1]}" 
+            savepath = path.join(current_app.root_path,f'static/images/{s_imagename}')
+            s_image.save(savepath)
+
+            #remove s_image from list and add image name instead
+            var_array.pop() 
+            var_array.append(s_imagename)
+
+            #some final sanitization
+            for val in var_array:
+                val = val.strip()
+            
+            insert_stmt = "INSERT INTO students(first_name,middle_name,last_name,email,dob,gender,phone,address,state,local_gov,kin,score,image_name) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s);"
             conn = mysql.get_db()
+            conn.ping(reconnect=True)
             cur = conn.cursor()
-            cur.execute('insert into students(first_name,middle_name,last_name,dob,state_of_origin,email,jamb_score,gender,phone,address,local_gov,next_of_kin) values(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s);',(s_fname,s_mname,s_lname,s_dob,s_state,s_email,s_score,s_gndr,s_phone,s_addr,s_lg,s_kin))
+            cur.execute(insert_stmt,(var_array))
             conn.commit()
             conn.close()
-            flash('Student added successfully','success')
-            return redirect(url_for('home'))
 
-@app.route("/student_details",methods=["GET","POST"])
-def student_details():
-    return render_template("student_details.html")
+            #confirm the db was affected
+            if cur.rowcount > 0:
+                flash('Student added successfully','success')
+                return redirect(url_for('students_index'))
+            else:
+                flash('Could not add Student, retry','danger')
+                return redirect(url_for('student_new'))
+            
 
-@app.route("/students_index",methods=["GET","POST"])
+@app.route("/admin/students")
 def students_index():
-    return render_template("students_index.html")
+    create_tb()
+    stmt = "SELECT id,first_name,middle_name,last_name,gender,score,status FROM students;"
+    conn = mysql.get_db()
+    conn.ping(reconnect=True)
+    cur = conn.cursor()
+    cur.execute(stmt)
+    rv = cur.fetchall()
+    return render_template("students_index.html",students=rv)
+
+@app.route("/admin/students/<id>",methods=["GET","POST"])
+def student_details(id):
+    create_tb()
+    student_id = id
+    stmt = "SELECT * FROM students WHERE id=%s;"
+    conn = mysql.get_db()
+    conn.ping(reconnect=True)
+    cur = conn.cursor()
+    cur.execute(stmt,(student_id))
+    rv = cur.fetchall()
+    if len(rv) > 0:
+        return render_template("student_details.html",student=rv[0])
+    else:
+        flash("No student found with that ID")
+        return redirect(url_for('students_index'))
+    
+
+@app.route("/admin/students/<id>/admitted",methods=["POST"])
+def student_admitted(id):
+    create_tb()
+    student_id = id
+    stmt = "UPDATE students SET status=%s WHERE id=%s;"
+    conn = mysql.get_db()
+    cur = conn.cursor()
+    conn.ping(reconnect=True)
+    try:
+        cur.execute(stmt,("admitted",student_id))
+        conn.commit()
+        conn.close()
+        if cur.rowcount > 0:
+            return "success"
+        else:
+            raise Exception()
+    except:
+        return "failure"
+
 if __name__ == "__main__":
     app.run(debug=True)

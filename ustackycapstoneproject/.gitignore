@@ -1,3 +1,6 @@
 .vscode
 .env
 /virtenv
+static/images/*
+!static/images/home_img.svg
+!static/images/profile_pic.png
