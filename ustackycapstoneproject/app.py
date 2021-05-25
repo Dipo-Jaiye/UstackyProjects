@@ -36,7 +36,7 @@ def create_tb():
             "first_name VARCHAR(50),"\
             "middle_name VARCHAR(50),"\
             "last_name VARCHAR(50),"\
-            "email VARCHAR(50),"\
+            "email VARCHAR(50) UNIQUE,"\
             "dob DATE,"\
             "gender VARCHAR(7),"\
             "phone VARCHAR(15),"\
@@ -51,6 +51,20 @@ def create_tb():
         cur.execute(stmt)
         conn.commit()
     conn.close()
+
+#Function to prevent duplicate email registration
+def check_email(email):
+    conn = mysql.get_db()
+    cur = conn.cursor()
+    conn.ping(reconnect=True)
+    find_stmt = "SELECT email FROM students WHERE email=%s"
+    cur.execute(find_stmt,(email))
+    rv = cur.fetchall()
+    if len(rv) > 0:
+        return True
+    else:
+        return False
+
 
 @app.route("/")
 def home():
@@ -81,6 +95,9 @@ def student_new():
         #prevent empty values and non-images from being uploaded
         if (not all(var_array)) or (s_image.mimetype.split('/')[0] != "image"):
             flash("Please fill all fields appropriately",'danger')
+            return redirect(url_for('student_new'))
+        elif check_email(s_email):
+            flash("Email has already been registered","danger")
             return redirect(url_for('student_new'))
         else:
             #save image regardless of file extension
